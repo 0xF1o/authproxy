@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><title>Authentication required</title>
+<style>
+body{font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#f4f4f7}
+.card{background:#fff;padding:2rem;border-radius:.5rem;box-shadow:0 2px 8px rgba(0,0,0,.1);min-width:16rem;text-align:center}
+input{padding:.5rem;width:100%;box-sizing:border-box;margin:.5rem 0}
+button{padding:.5rem 1rem;cursor:pointer}
+.err{color:#b00020;font-size:.9rem;min-height:1.2em}
+</style></head><body>
+<form class="card" method="post" action="/">
+<h1>Pin required</h1>
+<p>Enter the authentication pin to continue.</p>
+<p class="err">__ERROR__</p>
+<input type="password" name="pin" autofocus required>
+<button type="submit">Unlock</button>
+</form></body></html>

@@ -1,0 +1,18 @@
+services:
+  authproxy:
+    build: .
+    read_only: true
+    environment:
+      AUTH_PIN: ${AUTH_PIN:-1234}
+      TARGET: ${TARGET:-http://whoami:80}
+      COOKIE_NAME: ${COOKIE_NAME:-auth_pin}
+    ports:
+      - "8473:8473"
+    restart: unless-stopped
+
+  whoami:
+    image: docker.io/traefik/whoami:latest
+    read_only: true
+    ports:
+      - "80:80"
+    restart: unless-stopped
