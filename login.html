@@ -11,6 +11,61 @@ button{padding:.5rem 1rem;cursor:pointer}
 <h1>Pin required</h1>
 <p>Enter the authentication pin to continue.</p>
 <p class="err">__ERROR__</p>
-<input type="password" name="pin" autofocus required>
+<input type="password" name="pin" autofocus required autocomplete="off">
 <button type="submit">Unlock</button>
-</form></body></html>
+</form>
+<script>
+const K=__PUBKEY__, NONCE="__NONCE__";
+const KC=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+const rot=(x,n)=>(x>>>n)|(x<<(32-n));
+function sha256(d){
+  const l=d.length,n=((l+9+63)>>6)<<6,m=new Uint8Array(n),dv=new DataView(m.buffer);
+  m.set(d);m[l]=0x80;dv.setUint32(n-8,Math.floor(l/0x20000000));dv.setUint32(n-4,(l<<3)>>>0);
+  let h=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];const w=new Uint32Array(64);
+  for(let i=0;i<n;i+=64){
+    for(let j=0;j<16;j++)w[j]=dv.getUint32(i+j*4);
+    for(let j=16;j<64;j++)w[j]=(w[j-16]+(rot(w[j-15],7)^rot(w[j-15],18)^(w[j-15]>>>3))+w[j-7]+(rot(w[j-2],17)^rot(w[j-2],19)^(w[j-2]>>>10)))|0;
+    let[a,b,c,d,e,f,g,hh]=h;
+    for(let j=0;j<64;j++){
+      const t1=(hh+(rot(e,6)^rot(e,11)^rot(e,25))+((e&f)^(~e&g))+KC[j]+w[j])|0;
+      const t2=((rot(a,2)^rot(a,13)^rot(a,22))+((a&b)^(a&c)^(b&c)))|0;
+      hh=g;g=f;f=e;e=(d+t1)|0;d=c;c=b;b=a;a=(t1+t2)|0;
+    }
+    h=[h[0]+a,h[1]+b,h[2]+c,h[3]+d,h[4]+e,h[5]+f,h[6]+g,h[7]+hh];
+  }
+  const o=new Uint8Array(32),ov=new DataView(o.buffer);h.forEach((x,i)=>ov.setUint32(i*4,x>>>0));return o;
+}
+const unb64=s=>{const b=atob(s.replace(/-/g,"+").replace(/_/g,"/"));const u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u};
+const b64=u=>btoa(String.fromCharCode(...u)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+const toBig=u=>{let x=0n;for(const b of u)x=x<<8n|BigInt(b);return x};
+const toBytes=(x,l)=>{const u=new Uint8Array(l);for(let i=l-1;i>=0;i--){u[i]=Number(x&255n);x>>=8n}return u};
+const modPow=(b,e,m)=>{let r=1n;b%=m;for(;e>0n;e>>=1n,b=b*b%m)if(e&1n)r=r*b%m;return r};
+function mgf1(seed,l){
+  const o=new Uint8Array(l),b=new Uint8Array(seed.length+4);b.set(seed);
+  for(let c=0,i=0;i<l;i+=32,c++){b.set([c>>>24,(c>>>16)&255,(c>>>8)&255,c&255],seed.length);o.set(sha256(b).subarray(0,Math.min(32,l-i)),i)}
+  return o;
+}
+function rsaOAEP(msg){
+  const n=unb64(K.n),e=unb64(K.e),h=32,k=n.length,db=new Uint8Array(k-h-1);
+  if(msg.length>k-2*h-2)throw new Error("message too long");
+  db.set(sha256(new Uint8Array(0)));db[db.length-msg.length-1]=1;db.set(msg,db.length-msg.length);
+  const seed=crypto.getRandomValues(new Uint8Array(h)),dbMask=mgf1(seed,db.length),maskedDB=db.map((v,i)=>v^dbMask[i]);
+  const seedMask=mgf1(maskedDB,h),em=new Uint8Array(k);
+  em.set(seed.map((v,i)=>v^seedMask[i]),1);em.set(maskedDB,1+h);
+  return toBytes(modPow(toBig(em),toBig(e),toBig(n)),k);
+}
+const form=document.querySelector("form"),input=form.pin,btn=form.querySelector("button"),errBox=document.querySelector(".err");
+form.addEventListener("submit",async ev=>{
+  ev.preventDefault();btn.disabled=true;
+  try{
+    const msg=new TextEncoder().encode(JSON.stringify({n:NONCE,pin:input.value}));
+    input.value="";
+    const body="pin_enc="+encodeURIComponent(b64(rsaOAEP(msg)));
+    const res=await fetch("/",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/x-www-form-urlencoded","Accept":"application/json"},body});
+    const j=await res.json();
+    if(j.ok){location.replace("/");return}
+    errBox.textContent=j.error||"Login failed.";
+  }catch(x){errBox.textContent="Encryption failed: "+x.message}
+  btn.disabled=false;input.focus();
+});
+</script></body></html>

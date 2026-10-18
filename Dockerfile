@@ -1,7 +1,7 @@
 FROM golang:1.25 AS build
 WORKDIR /src
 COPY go.mod .
-COPY main.go login.html .
+COPY main.go crypto.go login.html .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /authproxy .
 
 FROM scratch

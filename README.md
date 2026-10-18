@@ -45,8 +45,22 @@ targets) and runs as `nobody`.
 
 ## How authentication works
 
-- **Login:** the form POSTs the pin to `/`. It is compared in constant time
-  and on success a cookie is set and the browser redirected to the target.
+- **Login:** the page renders the server's public RSA key (JWK) and a random
+  single-use nonce. JavaScript encrypts `{"n":<nonce>,"pin":<pin>}` with
+  RSA-OAEP-256 and POSTs the base64url ciphertext as `pin_enc`. The server
+  decrypts it, checks the nonce, compares the pin in constant time and on
+  success sets a cookie and replies `{"ok":true}` (the page then reloads into
+  the target). Plaintext pins are not accepted at all.
+- **Why not WebCrypto:** `crypto.subtle` only exists in secure contexts (HTTPS
+  or localhost), so it cannot be used on plain HTTP. The login page therefore
+  ships a tiny (about 1.5 KB) RSA-OAEP encryptor: SHA-256, MGF1 and a BigInt
+  modexp. Only `crypto.getRandomValues` is used, which works on insecure
+  origins too.
+- **Key lifetime:** the RSA key pair is generated at start and never leaves the
+  process, so a recorded ciphertext cannot be decrypted after a restart. A page
+  whose key went stale gets "Encryption key expired, please reload".
+- **Nonces:** each login page carries a 16-byte nonce (5 min TTL, burned on a
+  successful login), so a captured ciphertext cannot be replayed.
 - **Cookie value:** the cookie never contains the pin. It stores
   `hex(sha256(salt || pin))` where `salt` is a random 16-byte value generated
   at startup. The salt prevents offline brute-forcing of the pin from a leaked
@@ -58,8 +72,13 @@ targets) and runs as `nobody`.
 
 ## Security notes
 
-- The pin travels and is compared in plaintext over the connection. Run behind
-  TLS (or on localhost/trusted networks only).
+- This protects against **passive** eavesdropping: someone sniffing the wire
+  sees only RSA ciphertext (the encrypted payload is padded to the key size, so
+  the pin length is hidden as well).
+- It does **not** protect against an active man-in-the-middle, who can just
+  serve their own login page with their own key. For real protection put the
+  proxy behind TLS (or use it on localhost/trusted networks only).
+- Login requires JavaScript; there is no plaintext fallback.
 - `read_only: true` in the compose file; the container runs as `nobody`.
 - No rate limiting on pin attempts — keep it on a trusted network if the pin
   is short.

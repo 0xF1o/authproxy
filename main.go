@@ -1,11 +1,12 @@
 package main
 
 import (
-	_ "embed"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -39,6 +40,7 @@ func main() {
 	}
 	rand.Read(salt[:])
 	pinHash = hashPin(pin)
+	initCrypto()
 	cookieNm = os.Getenv("COOKIE_NAME")
 	if cookieNm == "" {
 		cookieNm = "auth_pin"
@@ -58,28 +60,67 @@ func main() {
 
 func auth(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
-		r.ParseForm()
-		if subtle.ConstantTimeCompare([]byte(hashPin(r.FormValue("pin"))), []byte(pinHash)) == 1 {
-			setCookie(w)
-			http.Redirect(w, r, target.Path, http.StatusFound)
-			return
-		}
-		w.Header().Set("Cache-Control", "no-store")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(renderLogin("Invalid pin. Please try again.")))
+		login(w, r)
 		return
 	}
 	if c, err := r.Cookie(cookieNm); err == nil && subtle.ConstantTimeCompare([]byte(c.Value), []byte(pinHash)) == 1 {
 		proxy.ServeHTTP(w, r)
 		return
 	}
+	reply(w, r, http.StatusOK, "")
+}
+
+func login(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if err := r.ParseForm(); err != nil {
+		reply(w, r, http.StatusBadRequest, "Invalid request.")
+		return
+	}
+	c, err := decryptPin(r.FormValue("pin_enc"))
+	if err != nil {
+		reply(w, r, http.StatusBadRequest, "Encryption key expired, please reload.")
+		return
+	}
+	if !nonceValid(c.N) {
+		reply(w, r, http.StatusBadRequest, "Login expired, please reload.")
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(hashPin(c.Pin)), []byte(pinHash)) != 1 {
+		reply(w, r, http.StatusUnauthorized, "Invalid pin. Please try again.")
+		return
+	}
+	redeemNonce(c.N)
+	setCookie(w)
+	if wantsJSON(r) {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	http.Redirect(w, r, target.Path, http.StatusFound)
+}
+
+func reply(w http.ResponseWriter, r *http.Request, code int, errMsg string) {
 	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(renderLogin("")))
+	if wantsJSON(r) {
+		writeJSON(w, code, map[string]any{"ok": false, "error": errMsg})
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK) // 200 so browsers render the form, not their own error page
+	w.Write([]byte(renderLogin(errMsg)))
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(v)
+}
+
+func wantsJSON(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "application/json")
 }
 
 func renderLogin(errMsg string) string {
-	return strings.Replace(loginPage, "__ERROR__", errMsg, 1)
+	return strings.NewReplacer("__ERROR__", errMsg, "__PUBKEY__", pubJWK, "__NONCE__", issueNonce()).Replace(loginPage)
 }
 
 func setCookie(w http.ResponseWriter) {
