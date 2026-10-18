@@ -1,5 +1,6 @@
 services:
   authproxy:
+    image: ghcr.io/0xf1o/authproxy:main
     build: .
     read_only: true
     environment:
