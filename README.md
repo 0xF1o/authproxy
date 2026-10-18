@@ -45,8 +45,9 @@ targets) and runs as `nobody`.
 
 ## How authentication works
 
-- **Login:** the form POSTs the pin to `/`. It is compared in constant time
-  and on success a cookie is set and the browser redirected to the target.
+- **Login:** the form POSTs the pin to the current URL. It is compared in constant time
+  and on success a cookie is set and the browser is redirected back to the
+  originally requested path (query string preserved).
 - **Cookie value:** the cookie never contains the pin. It stores
   `hex(sha256(salt || pin))` where `salt` is a random 16-byte value generated
   at startup. The salt prevents offline brute-forcing of the pin from a leaked

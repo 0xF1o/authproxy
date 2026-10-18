@@ -61,7 +61,9 @@ func auth(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		if subtle.ConstantTimeCompare([]byte(hashPin(r.FormValue("pin"))), []byte(pinHash)) == 1 {
 			setCookie(w)
-			http.Redirect(w, r, target.Path, http.StatusFound)
+			loc := r.URL.EscapedPath()
+			if r.URL.RawQuery != "" { loc += "?" + r.URL.RawQuery }
+			http.Redirect(w, r, loc, http.StatusFound)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
